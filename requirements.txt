@@ -1,0 +1,8 @@
+speechrecognition==3.14.3
+pyaudio==0.2.14
+pynput==1.8.1
+pillow==11.2.1
+pystray==0.19.5
+pyautogui==0.9.54
+pywin32==310
+psutil==7.0.0

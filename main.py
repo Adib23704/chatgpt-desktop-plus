@@ -4,7 +4,7 @@ import threading
 import time
 import logging
 from pynput.keyboard import Key, Controller
-from typing import Optional
+from typing import Optional, List
 import queue
 import sys
 from PIL import Image
@@ -14,19 +14,26 @@ import os
 
 class HotwordDetector:
     def __init__(self, 
-                 hotword: str = "hey chat", 
+                 hotwords: List[str] = None,
                  timeout: float = 1.0,
                  phrase_time_limit: float = 3.0,
                  energy_threshold: int = 300,
                  dynamic_energy_threshold: bool = True,
-                 icon_path: str = "icon.png"):
+                 icon_path: str = "assets/icon.png"):
 
-        self.hotword = hotword.lower()
+        if hotwords is None:
+            hotwords = [
+                "hey chat", "hai chat", "hi chat",
+                "hi gpt", "hey gpt", "hai gpt"
+            ]
+        
+        self.hotwords = [hotword.lower() for hotword in hotwords]
         self.timeout = timeout
         self.phrase_time_limit = phrase_time_limit
         self.running = False
         self.listening = True  # Toggle state for listening
         self.icon_path = icon_path
+        self.last_detected_hotword = None  # Track which hotword was detected
         
         self.recognizer = sr.Recognizer()
         self.recognizer.energy_threshold = energy_threshold
@@ -41,6 +48,8 @@ class HotwordDetector:
         
         self.tray_icon = None
         
+        self.logger.info(f"Configured hotwords: {', '.join(self.hotwords)}")
+        
     def _load_icon(self) -> Image.Image:
         try:
             if os.path.exists(self.icon_path):
@@ -53,7 +62,6 @@ class HotwordDetector:
             return self._create_default_icon()
     
     def _create_default_icon(self) -> Image.Image:
-        """Create a simple default icon."""
         img = Image.new('RGB', (64, 64), color='blue')
         return img
     
@@ -81,13 +89,24 @@ class HotwordDetector:
             except Exception as e:
                 self.logger.error(f"Error in audio processing worker: {e}")
     
+    def _check_hotwords(self, text: str) -> Optional[str]:
+        text_lower = text.lower()
+        
+        for hotword in self.hotwords:
+            if hotword in text_lower:
+                return hotword
+        
+        return None
+    
     def _recognize_audio(self, audio_data) -> None:
         try:
-            text = self.recognizer.recognize_google(audio_data).lower()
+            text = self.recognizer.recognize_google(audio_data)
             self.logger.info(f"Recognized: {text}")
             
-            if self.hotword in text:
-                self.logger.info("Hotword detected! Triggering action...")
+            detected_hotword = self._check_hotwords(text)
+            if detected_hotword:
+                self.last_detected_hotword = detected_hotword
+                self.logger.info(f"Hotword '{detected_hotword}' detected! Triggering action...")
                 self._trigger_action()
                 
         except sr.UnknownValueError:
@@ -102,7 +121,7 @@ class HotwordDetector:
             with self.keyboard.pressed(Key.alt):
                 self.keyboard.press(Key.space)
                 self.keyboard.release(Key.space)
-            self.logger.info("Action triggered successfully")
+            self.logger.info(f"Action triggered successfully for hotword: {self.last_detected_hotword}")
         except Exception as e:
             self.logger.error(f"Failed to trigger action: {e}")
     
@@ -139,6 +158,9 @@ class HotwordDetector:
         if self.tray_icon:
             self.tray_icon.update_menu()
     
+    def show_hotwords(self, icon=None, item=None) -> None:
+        self.logger.info(f"Configured hotwords: {', '.join(self.hotwords)}")
+    
     def quit_application(self, icon=None, item=None) -> None:
         self.logger.info("Quitting application...")
         self.stop()
@@ -148,10 +170,13 @@ class HotwordDetector:
     def _create_tray_menu(self):
         return pystray.Menu(
             item(
-                lambda text: f"{'✓' if self.listening else '✗'} Listening",
+                lambda text: f"Listening",
                 self.toggle_listening,
                 checked=lambda item: self.listening
             ),
+            pystray.Menu.SEPARATOR,
+            item("Show Hotwords", self.show_hotwords),
+            pystray.Menu.SEPARATOR,
             item("Quit", self.quit_application)
         )
     
@@ -161,7 +186,7 @@ class HotwordDetector:
             self.tray_icon = pystray.Icon(
                 "hotword_detector",
                 icon_image,
-                "Hotword Detector",
+                "Multi-Hotword Detector",
                 menu=self._create_tray_menu()
             )
             
@@ -173,12 +198,29 @@ class HotwordDetector:
         except Exception as e:
             self.logger.error(f"Failed to create tray icon: {e}")
     
+    def add_hotword(self, hotword: str) -> None:
+        hotword_lower = hotword.lower()
+        if hotword_lower not in self.hotwords:
+            self.hotwords.append(hotword_lower)
+            self.logger.info(f"Added new hotword: {hotword}")
+        else:
+            self.logger.warning(f"Hotword '{hotword}' already exists")
+    
+    def remove_hotword(self, hotword: str) -> None:
+        hotword_lower = hotword.lower()
+        if hotword_lower in self.hotwords:
+            self.hotwords.remove(hotword_lower)
+            self.logger.info(f"Removed hotword: {hotword}")
+        else:
+            self.logger.warning(f"Hotword '{hotword}' not found")
+    
     def start(self) -> None:
         if self.running:
             self.logger.warning("Detector is already running")
             return
             
-        self.logger.info(f"Starting hotword detection for: '{self.hotword}'")
+        self.logger.info(f"Starting multi-hotword detection...")
+        self.logger.info(f"Monitoring hotwords: {', '.join(self.hotwords)}")
         self.running = True
         
         self._setup_tray_icon()
@@ -216,10 +258,15 @@ class HotwordDetector:
         self.logger.info("Hotword detection stopped")
 
 def main():
+    custom_hotwords = [
+        "hey chat", "hai chat", "hi chat",
+        "hi gpt", "hey gpt", "hai gpt"
+    ]
+    
     icon_path = "assets/icon.png"
     
     detector = HotwordDetector(
-        hotword="hey chat",
+        hotwords=custom_hotwords,
         timeout=1.0,
         phrase_time_limit=3.0,
         energy_threshold=300,
